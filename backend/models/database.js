@@ -71,7 +71,7 @@ function createTables() {
         // Insert sample data for demonstration
         insertSampleData()
           .then(() => {
-            console.log('✅ Database tables created successfully');
+            console.log('Database tables created successfully');
             resolve();
           })
           .catch(reject);
@@ -158,7 +158,7 @@ async function insertSampleData() {
             }
             completed++;
             if (completed === sampleReceipts.length) {
-              console.log('✅ Sample data inserted');
+              console.log('Sample data inserted');
               resolve();
             }
           });
