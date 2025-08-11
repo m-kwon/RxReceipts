@@ -13,6 +13,8 @@ function AllReceipts({ user, onError }) {
   });
   const [categories, setCategories] = useState([]);
 
+  const IMAGE_SERVICE_URL = 'http://localhost:5001';
+
   useEffect(() => {
     fetchCategories();
     fetchReceipts();
@@ -39,7 +41,6 @@ function AllReceipts({ user, onError }) {
       const response = await api.receipts.getAll(params);
       let fetchedReceipts = response.data.receipts || [];
 
-      // Client-side sorting since backend might not support it yet
       fetchedReceipts.sort((a, b) => {
         let aValue, bValue;
 
@@ -86,8 +87,20 @@ function AllReceipts({ user, onError }) {
     }));
   };
 
+  const getImageUrl = (receipt) => {
+    if (receipt.image_id) {
+      return `${IMAGE_SERVICE_URL}/image/${receipt.image_id}`;
+    }
+    if (receipt.legacy_image_url) {
+      return `http://localhost:3001${receipt.legacy_image_url}`;
+    }
+    if (receipt.image_path) {
+      return `http://localhost:3001/uploads/${user.id}/${receipt.image_path}`;
+    }
+    return null;
+  };
+
   const handleDelete = async (receiptId) => {
-    // IH#8: Encourage mindful tinkering - confirmation dialog
     if (!window.confirm('Are you sure you want to delete this receipt? This action cannot be undone and you will lose all receipt data.')) {
       return;
     }
@@ -96,7 +109,6 @@ function AllReceipts({ user, onError }) {
       await api.receipts.delete(receiptId);
       setReceipts(prev => prev.filter(r => r.id !== receiptId));
 
-      // Success feedback
       const successMessage = document.createElement('div');
       successMessage.className = 'success-banner';
       successMessage.innerHTML = `
@@ -162,7 +174,7 @@ function AllReceipts({ user, onError }) {
           </Link>
         </div>
 
-        {/* Filters Section (IH#3: Let users gather as much info as they want) */}
+        {/* Filters Section */}
         <div className="filters-section">
           <div className="filters-grid">
             {/* Search Input */}
@@ -301,78 +313,89 @@ function AllReceipts({ user, onError }) {
         {/* Receipts List */}
         {!loading && receipts.length > 0 && (
           <div className="receipts-grid" style={{ marginTop: 'var(--spacing-xl)' }}>
-            {receipts.map((receipt) => (
-              <div key={receipt.id} className="receipt-card fade-in">
-                <div className="receipt-thumbnail">
-                  {receipt.image_path ? (
-                    <img
-                      src={`http://localhost:3001/uploads/${user.id}/${receipt.image_path}`}
-                      alt={`Receipt from ${receipt.store_name}`}
-                      onError={(e) => {
-                        e.target.style.display = 'none';
-                        e.target.nextSibling.style.display = 'flex';
-                      }}
-                    />
-                  ) : null}
-                  <div style={{
-                    display: receipt.image_path ? 'none' : 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: 'var(--font-size-xl)'
-                  }}>
-                    📄
-                  </div>
-                </div>
+            {receipts.map((receipt) => {
+              const imageUrl = getImageUrl(receipt);
 
-                <div className="receipt-details">
-                  <div className="receipt-store">{receipt.store_name}</div>
-                  <div className="receipt-meta">
-                    {formatDate(receipt.receipt_date)}
-                  </div>
-                  <div className="receipt-amount">
-                    {formatCurrency(receipt.amount)}
-                  </div>
-                  <div className="receipt-category">
-                    {receipt.category}
-                  </div>
-                  {receipt.description && (
+              return (
+                <div key={receipt.id} className="receipt-card fade-in">
+                  <div className="receipt-thumbnail">
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt={`Receipt from ${receipt.store_name}`}
+                        onError={(e) => {
+                          e.target.style.display = 'none';
+                          e.target.nextSibling.style.display = 'flex';
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          objectFit: 'cover',
+                          borderRadius: 'var(--border-radius-sm)'
+                        }}
+                      />
+                    ) : null}
                     <div style={{
-                      fontSize: 'var(--font-size-sm)',
-                      color: 'var(--text-secondary)',
-                      marginTop: 'var(--spacing-xs)',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden'
+                      display: imageUrl ? 'none' : 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 'var(--font-size-xl)',
+                      color: 'var(--text-muted)'
                     }}>
-                      {receipt.description}
+                      📄
                     </div>
-                  )}
-                </div>
+                  </div>
 
-                {/* Receipt Actions (IH#5: Make undo/redo available) */}
-                <div className="receipt-actions">
-                  <Link
-                    to={`/receipt/${receipt.id}/edit`}
-                    className="btn btn-sm btn-outline"
-                    style={{ textDecoration: 'none' }}
-                  >
-                    Edit
-                  </Link>
-                  <button
-                    onClick={() => handleDelete(receipt.id)}
-                    className="btn btn-sm delete-btn"
-                    style={{
-                      background: 'none',
-                      border: '1px solid var(--danger-color)',
-                      color: 'var(--danger-color)'
-                    }}
-                  >
-                    Delete
-                  </button>
+                  <div className="receipt-details">
+                    <div className="receipt-store">{receipt.store_name}</div>
+                    <div className="receipt-meta">
+                      {formatDate(receipt.receipt_date)}
+                    </div>
+                    <div className="receipt-amount">
+                      {formatCurrency(receipt.amount)}
+                    </div>
+                    <div className="receipt-category">
+                      {receipt.category}
+                    </div>
+                    {receipt.description && (
+                      <div style={{
+                        fontSize: 'var(--font-size-sm)',
+                        color: 'var(--text-secondary)',
+                        marginTop: 'var(--spacing-xs)',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden'
+                      }}>
+                        {receipt.description}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Receipt Actions */}
+                  <div className="receipt-actions">
+                    <Link
+                      to={`/receipt/${receipt.id}/edit`}
+                      className="btn btn-sm btn-outline"
+                      style={{ textDecoration: 'none' }}
+                    >
+                      Edit
+                    </Link>
+                    <button
+                      onClick={() => handleDelete(receipt.id)}
+                      className="btn btn-sm delete-btn"
+                      style={{
+                        background: 'none',
+                        border: '1px solid var(--danger-color)',
+                        color: 'var(--danger-color)'
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -387,22 +410,6 @@ function AllReceipts({ user, onError }) {
             textAlign: 'center'
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: 'var(--spacing-lg)' }}>
-              <div>
-                <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 'bold', color: 'var(--primary-color)' }}>
-                  {receipts.length}
-                </div>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-                  Total Receipts
-                </div>
-              </div>
-              <div>
-                <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 'bold', color: 'var(--secondary-color)' }}>
-                  {formatCurrency(totalAmount)}
-                </div>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-                  Total Amount
-                </div>
-              </div>
               <div>
                 <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 'bold', color: 'var(--accent-color)' }}>
                   {new Set(receipts.map(r => r.category)).size}

@@ -12,11 +12,10 @@ const {
   deleteReceipt,
   getReceiptStats
 } = require('../models/database');
-const ocrService = require('../services/ocrService');
 
 const router = express.Router();
 
-const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL || 'http://localhost:5001';
+const IMAGE_SERVICE_URL = 'http://localhost:5001';
 
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
@@ -61,6 +60,7 @@ function getImageUrl(imageId) {
   return imageId ? `${IMAGE_SERVICE_URL}/image/${imageId}` : null;
 }
 
+// Get all receipts for user
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 20, category, search } = req.query;
@@ -83,11 +83,10 @@ router.get('/', authenticateToken, async (req, res) => {
       );
     }
 
-    // Add image URLs to receipts
     receipts = receipts.map(receipt => ({
       ...receipt,
-      image_url: getImageUrl(receipt.image_id),
-      legacy_image_path: receipt.image_path
+      image_url: receipt.image_id ? getImageUrl(receipt.image_id) : null,
+      legacy_image_url: receipt.image_path ? `/uploads/${req.user.userId}/${receipt.image_path}` : null
     }));
 
     res.json({
@@ -108,6 +107,7 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
+// Get receipt statistics
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const stats = await getReceiptStats(req.user.userId);
@@ -121,6 +121,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
   }
 });
 
+// Get single receipt by ID
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const receipt = await getReceiptById(req.params.id, req.user.userId);
@@ -263,6 +264,7 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (category !== undefined) updates.category = category;
     if (description !== undefined) updates.description = description?.trim() || null;
 
+    // Handle image ID updates
     if (image_id !== undefined) {
       if (image_id && await verifyImageExists(image_id)) {
         updates.image_id = image_id;
@@ -338,7 +340,6 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Get categories list
 router.get('/meta/categories', authenticateToken, (req, res) => {
   const categories = [
     {
@@ -384,87 +385,5 @@ router.get('/meta/categories', authenticateToken, (req, res) => {
     note: 'HSA/FSA eligibility may vary. Consult your plan administrator for specific rules.'
   });
 });
-
-router.post('/ocr/parse', authenticateToken, async (req, res) => {
-  try {
-    const { image_id } = req.body;
-
-    if (!image_id) {
-      return res.status(400).json({
-        error: 'Missing image ID',
-        details: 'Please provide an image_id from the image service'
-      });
-    }
-
-    console.log(`Processing OCR for image ID: ${image_id}`);
-
-    const ocrResult = await ocrService.extractTextFromImageId(image_id);
-
-    if (!ocrResult.success) {
-      return res.status(500).json({
-        error: 'OCR extraction failed',
-        details: ocrResult.details || 'Failed to extract text from image'
-      });
-    }
-
-    const extractedText = ocrResult.data.text;
-    console.log(`Extracted text (${extractedText.length} chars): ${extractedText.substring(0, 100)}...`);
-
-    const parsedData = ocrService.parseReceiptData(extractedText);
-
-    res.json({
-      success: true,
-      message: 'Receipt data extracted and parsed successfully',
-      data: {
-        store_name: parsedData.store_name,
-        amount: parsedData.amount,
-        receipt_date: parsedData.receipt_date,
-        suggested_category: parsedData.category,
-        line_items: parsedData.line_items,
-
-        confidence: parsedData.confidence,
-        ocr_processing_time: ocrResult.data.processing_time_ms,
-        text_length: ocrResult.data.text_length,
-
-        raw_text: parsedData.raw_text,
-        image_id: image_id
-      },
-      suggestions: {
-        review_required: parsedData.confidence === 'low',
-        fields_to_verify: getFieldsToVerify(parsedData)
-      }
-    });
-
-  } catch (error) {
-    console.error('OCR parsing error:', error);
-    res.status(500).json({
-      error: 'OCR processing failed',
-      details: error.message,
-      suggestion: 'You can still enter receipt details manually'
-    });
-  }
-});
-
-function getFieldsToVerify(parsedData) {
-  const fieldsToVerify = [];
-
-  if (!parsedData.store_name || parsedData.store_name === 'Unknown Store') {
-    fieldsToVerify.push('store_name');
-  }
-
-  if (!parsedData.amount || parsedData.amount <= 0) {
-    fieldsToVerify.push('amount');
-  }
-
-  if (!parsedData.receipt_date) {
-    fieldsToVerify.push('receipt_date');
-  }
-
-  if (parsedData.category === 'Other') {
-    fieldsToVerify.push('category');
-  }
-
-  return fieldsToVerify;
-}
 
 module.exports = router;

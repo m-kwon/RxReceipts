@@ -7,6 +7,8 @@ function Dashboard({ user, onError }) {
   const [recentReceipts, setRecentReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const IMAGE_SERVICE_URL = 'http://localhost:5001';
+
   useEffect(() => {
     fetchDashboardData();
   }, []);
@@ -47,6 +49,18 @@ function Dashboard({ user, onError }) {
     });
   };
 
+  const getImageUrl = (receipt) => {
+    // Use image service URL if image_id exists
+    if (receipt.image_id) {
+      return `${IMAGE_SERVICE_URL}/image/${receipt.image_id}`;
+    }
+    // Fallback to legacy image path
+    if (receipt.image_path) {
+      return `http://localhost:3001/uploads/${user.id}/${receipt.image_path}`;
+    }
+    return null;
+  };
+
   if (loading) {
     return (
       <div className="dashboard">
@@ -73,7 +87,7 @@ function Dashboard({ user, onError }) {
           </p>
         </div>
 
-        {/* Stats Grid (IH#3: Summary information) */}
+        {/* Stats Grid */}
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-number">
@@ -104,7 +118,7 @@ function Dashboard({ user, onError }) {
           </div>
         </div>
 
-        {/* Category Breakdown (if available) */}
+        {/* Category Breakdown */}
         {stats?.categories && stats.categories.length > 0 && (
           <div className="category-section">
             <h3>Expenses by Category</h3>
@@ -150,7 +164,7 @@ function Dashboard({ user, onError }) {
           </div>
         )}
 
-        {/* Quick Actions (IH#6: Provide explicit path) */}
+        {/* Quick Actions */}
         <div className="quick-actions">
           <Link to="/upload" className="btn btn-primary btn-lg">
             Add New Receipt
@@ -163,7 +177,7 @@ function Dashboard({ user, onError }) {
           </Link>
         </div>
 
-        {/* Recent Receipts (IH#3: Show recent activity, allow drill-down) */}
+        {/* Recent Receipts */}
         <div className="recent-receipts">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <h3>Recent Receipts</h3>
@@ -193,98 +207,83 @@ function Dashboard({ user, onError }) {
             </div>
           ) : (
             <div className="receipts-list">
-              {recentReceipts.map((receipt) => (
-                <div key={receipt.id} className="receipt-card">
-                  <div className="receipt-thumbnail">
-                    {receipt.image_path ? (
-                      <img
-                        src={`http://localhost:3001/uploads/${user.id}/${receipt.image_path}`}
-                        alt={`Receipt from ${receipt.store_name}`}
-                        onError={(e) => {
-                          e.target.style.display = 'none';
-                          e.target.nextSibling.style.display = 'block';
-                        }}
-                      />
-                    ) : null}
-                    <div style={{ display: receipt.image_path ? 'none' : 'block' }}>
-                      📄
-                    </div>
-                  </div>
+              {recentReceipts.map((receipt) => {
+                const imageUrl = getImageUrl(receipt);
 
-                  <div className="receipt-details">
-                    <div className="receipt-store">{receipt.store_name}</div>
-                    <div className="receipt-meta">
-                      {formatDate(receipt.receipt_date)}
-                    </div>
-                    <div className="receipt-amount">
-                      {formatCurrency(receipt.amount)}
-                    </div>
-                    <div className="receipt-category">
-                      {receipt.category}
-                    </div>
-                    {receipt.description && (
+                return (
+                  <div key={receipt.id} className="receipt-card">
+                    <div className="receipt-thumbnail">
+                      {imageUrl ? (
+                        <img
+                          src={imageUrl}
+                          alt={`Receipt from ${receipt.store_name}`}
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                            e.target.nextSibling.style.display = 'flex';
+                          }}
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            objectFit: 'cover',
+                            borderRadius: 'var(--border-radius-sm)'
+                          }}
+                        />
+                      ) : null}
                       <div style={{
-                        fontSize: 'var(--font-size-sm)',
-                        color: 'var(--text-secondary)',
-                        marginTop: 'var(--spacing-xs)'
+                        display: imageUrl ? 'none' : 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 'var(--font-size-xl)',
+                        color: 'var(--text-muted)'
                       }}>
-                        {receipt.description}
+                        📄
                       </div>
-                    )}
-                  </div>
+                    </div>
 
-                  <div className="receipt-actions">
-                    <Link
-                      to={`/receipt/${receipt.id}/edit`}
-                      style={{
-                        color: 'var(--primary-color)',
-                        textDecoration: 'none',
-                        fontSize: 'var(--font-size-sm)'
-                      }}
-                    >
-                      Edit
-                    </Link>
+                    <div className="receipt-details">
+                      <div className="receipt-store">{receipt.store_name}</div>
+                      <div className="receipt-meta">
+                        {formatDate(receipt.receipt_date)}
+                      </div>
+                      <div className="receipt-amount">
+                        {formatCurrency(receipt.amount)}
+                      </div>
+                      <div className="receipt-category">
+                        {receipt.category}
+                      </div>
+                      {receipt.description && (
+                        <div style={{
+                          fontSize: 'var(--font-size-sm)',
+                          color: 'var(--text-secondary)',
+                          marginTop: 'var(--spacing-xs)',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden'
+                        }}>
+                          {receipt.description}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="receipt-actions">
+                      <Link
+                        to={`/receipt/${receipt.id}/edit`}
+                        style={{
+                          color: 'var(--primary-color)',
+                          textDecoration: 'none',
+                          fontSize: 'var(--font-size-sm)'
+                        }}
+                      >
+                        Edit
+                      </Link>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
-
-        {/* Tips Section (IH#1: Explain benefits) */}
-        {/* <div className="tips-section" style={{
-          background: 'white',
-          padding: 'var(--spacing-xl)',
-          borderRadius: 'var(--border-radius-lg)',
-          boxShadow: 'var(--shadow-sm)',
-          marginTop: 'var(--spacing-xxl)'
-        }}>
-          <h3 style={{ marginBottom: 'var(--spacing-lg)' }}>💡 Tips for Managing Your Receipts</h3>
-          <div className="tips-grid" style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-            gap: 'var(--spacing-lg)'
-          }}>
-            <div className="tip-item">
-              <h4>📱 Quick Upload</h4>
-              <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-                Take photos immediately after purchases for best quality and to avoid losing receipts.
-              </p>
-            </div>
-            <div className="tip-item">
-              <h4>🏷️ Proper Categorization</h4>
-              <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-                Accurate categories help with HSA/FSA compliance and make tax time easier.
-              </p>
-            </div>
-            <div className="tip-item">
-              <h4>📊 Regular Reviews</h4>
-              <p style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-                Check your expenses monthly to stay on budget and catch any missing receipts.
-              </p>
-            </div>
-          </div>
-        </div> */}
       </div>
     </div>
   );
