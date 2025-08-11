@@ -8,7 +8,8 @@ const api = axios.create({
   }
 });
 
-// Request interceptor to add auth token
+const IMAGE_SERVICE_URL = 'http://localhost:5001';
+
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('rxreceipts_token');
@@ -22,14 +23,12 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor to handle common errors
 api.interceptors.response.use(
   (response) => {
     return response;
   },
   (error) => {
     if (error.response?.status === 401) {
-      // Token expired or invalid
       localStorage.removeItem('rxreceipts_token');
       window.location.href = '/login';
     }
@@ -37,9 +36,40 @@ api.interceptors.response.use(
   }
 );
 
-// API methods
+const imageService = {
+  uploadImage: async (file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+
+    const response = await fetch(`${IMAGE_SERVICE_URL}/upload`, {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to upload image');
+    }
+
+    return response.json();
+  },
+
+  getImageUrl: (imageId) => {
+    return `${IMAGE_SERVICE_URL}/image/${imageId}`;
+  },
+
+  verifyImage: async (imageId) => {
+    try {
+      const response = await fetch(`${IMAGE_SERVICE_URL}/image/${imageId}`, {
+        method: 'HEAD'
+      });
+      return response.ok;
+    } catch (error) {
+      return false;
+    }
+  }
+};
+
 const apiMethods = {
-  // Set auth token manually
   setAuthToken: (token) => {
     if (token) {
       api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -48,12 +78,10 @@ const apiMethods = {
     }
   },
 
-  // Clear auth token
   clearAuthToken: () => {
     delete api.defaults.headers.common['Authorization'];
   },
 
-  // Auth endpoints
   auth: {
     login: (credentials) => api.post('/auth/login', credentials),
     register: (userData) => api.post('/auth/register', userData),
@@ -62,18 +90,21 @@ const apiMethods = {
     logout: () => api.post('/auth/logout')
   },
 
-  // Receipt endpoints
   receipts: {
     getAll: (params = {}) => api.get('/receipts', { params }),
     getById: (id) => api.get(`/receipts/${id}`),
     create: (receiptData) => api.post('/receipts', receiptData),
+
+    createWithImageId: (receiptData) => api.post('/receipts', receiptData),
+
     update: (id, updates) => api.put(`/receipts/${id}`, updates),
     delete: (id) => api.delete(`/receipts/${id}`),
     getStats: () => api.get('/receipts/stats'),
     getCategories: () => api.get('/receipts/meta/categories')
   },
 
-  // File upload endpoint
+  images: imageService,
+
   upload: {
     receiptImage: (formData) => {
       return api.post('/receipts', formData, {
@@ -84,7 +115,6 @@ const apiMethods = {
     }
   },
 
-  // Generic HTTP methods
   get: (url, config) => api.get(url, config),
   post: (url, data, config) => api.post(url, data, config),
   put: (url, data, config) => api.put(url, data, config),

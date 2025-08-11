@@ -23,7 +23,6 @@ function initializeDatabase() {
   });
 }
 
-// Create database tables
 function createTables() {
   return new Promise((resolve, reject) => {
     const createUsersTable = `
@@ -46,6 +45,7 @@ function createTables() {
         category TEXT NOT NULL,
         description TEXT,
         image_path TEXT,
+        image_id TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (user_id) REFERENCES users (id)
@@ -68,8 +68,8 @@ function createTables() {
           return;
         }
 
-        // Insert sample data for demonstration
-        insertSampleData()
+        addImageIdColumnIfNotExists()
+          .then(() => insertSampleData())
           .then(() => {
             console.log('Database tables created successfully');
             resolve();
@@ -80,10 +80,36 @@ function createTables() {
   });
 }
 
-// Insert sample data for demonstration (IH#3: Let users see data immediately)
+function addImageIdColumnIfNotExists() {
+  return new Promise((resolve, reject) => {
+    db.all("PRAGMA table_info(receipts)", (err, columns) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+
+      const hasImageId = columns.some(col => col.name === 'image_id');
+
+      if (!hasImageId) {
+        console.log('Adding image_id column to receipts table...');
+        db.run("ALTER TABLE receipts ADD COLUMN image_id TEXT", (err) => {
+          if (err) {
+            console.error('Error adding image_id column:', err);
+            reject(err);
+          } else {
+            console.log('image_id column added successfully');
+            resolve();
+          }
+        });
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
 async function insertSampleData() {
   return new Promise((resolve, reject) => {
-    // Check if sample user already exists
     db.get("SELECT id FROM users WHERE email = 'demo@rxreceipts.com'", (err, row) => {
       if (err) {
         reject(err);
@@ -91,12 +117,10 @@ async function insertSampleData() {
       }
 
       if (row) {
-        // Sample data already exists
         resolve();
         return;
       }
 
-      // Insert demo user (password: "demo123")
       const bcrypt = require('bcrypt');
       const hashedPassword = bcrypt.hashSync('demo123', 10);
 
@@ -113,34 +137,36 @@ async function insertSampleData() {
 
         const userId = this.lastID;
 
-        // Insert sample receipts
         const sampleReceipts = [
           {
             store_name: 'CVS Pharmacy',
             amount: 25.99,
             receipt_date: '2024-03-15',
             category: 'Pharmacy',
-            description: 'Monthly prescription refill'
+            description: 'Monthly prescription refill',
+            image_id: null
           },
           {
             store_name: 'Dr. Smith Dental',
             amount: 150.00,
             receipt_date: '2024-03-12',
             category: 'Dental',
-            description: 'Routine cleaning and checkup'
+            description: 'Routine cleaning and checkup',
+            image_id: null
           },
           {
             store_name: 'LensCrafters',
             amount: 89.99,
             receipt_date: '2024-03-08',
             category: 'Vision',
-            description: 'Contact lens solution'
+            description: 'Contact lens solution',
+            image_id: null
           }
         ];
 
         const insertReceipt = `
-          INSERT INTO receipts (user_id, store_name, amount, receipt_date, category, description)
-          VALUES (?, ?, ?, ?, ?, ?)
+          INSERT INTO receipts (user_id, store_name, amount, receipt_date, category, description, image_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
         `;
 
         let completed = 0;
@@ -151,7 +177,8 @@ async function insertSampleData() {
             receipt.amount,
             receipt.receipt_date,
             receipt.category,
-            receipt.description
+            receipt.description,
+            receipt.image_id
           ], (err) => {
             if (err) {
               console.error('Error inserting sample receipt:', err);
@@ -168,9 +195,7 @@ async function insertSampleData() {
   });
 }
 
-// Database helper functions
 const dbHelpers = {
-  // Get user by email
   getUserByEmail: (email) => {
     return new Promise((resolve, reject) => {
       db.get("SELECT * FROM users WHERE email = ?", [email], (err, row) => {
@@ -180,7 +205,6 @@ const dbHelpers = {
     });
   },
 
-  // Create new user
   createUser: (email, hashedPassword, name) => {
     return new Promise((resolve, reject) => {
       const sql = "INSERT INTO users (email, password, name) VALUES (?, ?, ?)";
@@ -191,7 +215,6 @@ const dbHelpers = {
     });
   },
 
-  // Get user by ID
   getUserById: (userId) => {
     return new Promise((resolve, reject) => {
       db.get("SELECT id, email, name, created_at FROM users WHERE id = ?", [userId], (err, row) => {
@@ -201,12 +224,11 @@ const dbHelpers = {
     });
   },
 
-  // Create new receipt
   createReceipt: (receiptData) => {
     return new Promise((resolve, reject) => {
       const sql = `
-        INSERT INTO receipts (user_id, store_name, amount, receipt_date, category, description, image_path)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO receipts (user_id, store_name, amount, receipt_date, category, description, image_path, image_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       db.run(sql, [
@@ -216,7 +238,8 @@ const dbHelpers = {
         receiptData.receipt_date,
         receiptData.category,
         receiptData.description,
-        receiptData.image_path
+        receiptData.image_path || null,
+        receiptData.image_id || null
       ], function(err) {
         if (err) reject(err);
         else resolve({ id: this.lastID, ...receiptData });
@@ -224,7 +247,6 @@ const dbHelpers = {
     });
   },
 
-  // Get receipts for user
   getReceiptsByUser: (userId, limit = 50, offset = 0) => {
     return new Promise((resolve, reject) => {
       const sql = `
@@ -241,7 +263,6 @@ const dbHelpers = {
     });
   },
 
-  // Get receipt by ID
   getReceiptById: (receiptId, userId) => {
     return new Promise((resolve, reject) => {
       db.get(
@@ -255,7 +276,6 @@ const dbHelpers = {
     });
   },
 
-  // Update receipt
   updateReceipt: (receiptId, userId, updates) => {
     return new Promise((resolve, reject) => {
       const fields = Object.keys(updates).map(key => `${key} = ?`).join(', ');
@@ -275,7 +295,6 @@ const dbHelpers = {
     });
   },
 
-  // Delete receipt
   deleteReceipt: (receiptId, userId) => {
     return new Promise((resolve, reject) => {
       db.run(
@@ -289,7 +308,6 @@ const dbHelpers = {
     });
   },
 
-  // Get receipt statistics
   getReceiptStats: (userId) => {
     return new Promise((resolve, reject) => {
       const sql = `
@@ -319,6 +337,42 @@ const dbHelpers = {
           };
           resolve(totalStats);
         }
+      });
+    });
+  },
+
+  getReceiptsWithImageInfo: (userId, limit = 50, offset = 0) => {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT *,
+               CASE
+                 WHEN image_id IS NOT NULL THEN 'microservice'
+                 WHEN image_path IS NOT NULL THEN 'legacy'
+                 ELSE 'none'
+               END as image_type
+        FROM receipts
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT ? OFFSET ?
+      `;
+
+      db.all(sql, [userId, limit, offset], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
+      });
+    });
+  },
+
+  migrateLegacyImages: (userId) => {
+    return new Promise((resolve, reject) => {
+      const sql = `
+        SELECT id, image_path FROM receipts
+        WHERE user_id = ? AND image_path IS NOT NULL AND image_id IS NULL
+      `;
+
+      db.all(sql, [userId], (err, rows) => {
+        if (err) reject(err);
+        else resolve(rows);
       });
     });
   }

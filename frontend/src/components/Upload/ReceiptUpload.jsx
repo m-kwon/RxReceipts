@@ -13,15 +13,14 @@ function ReceiptUpload({ user, onError }) {
   const cameraInputRef = useRef(null);
   const navigate = useNavigate();
 
-  // IH#7: Provide ways to try out different approaches
+  const IMAGE_SERVICE_URL = 'http://localhost:5001';
+
   const handleFileSelect = (file) => {
-    // Validate file type
     if (!file.type.startsWith('image/')) {
       onError('Please select an image file (JPG, PNG, etc.)');
       return;
     }
 
-    // Validate file size (10MB limit)
     if (file.size > 10 * 1024 * 1024) {
       onError('File is too large. Please select an image under 10MB.');
       return;
@@ -29,7 +28,6 @@ function ReceiptUpload({ user, onError }) {
 
     setSelectedFile(file);
 
-    // Create preview
     const reader = new FileReader();
     reader.onload = (e) => setPreview(e.target.result);
     reader.readAsDataURL(file);
@@ -49,7 +47,6 @@ function ReceiptUpload({ user, onError }) {
     }
   };
 
-  // Drag and drop handlers
   const handleDragOver = (e) => {
     e.preventDefault();
     setDragOver(true);
@@ -80,23 +77,40 @@ function ReceiptUpload({ user, onError }) {
     setProgress(10);
 
     try {
-      const formData = new FormData();
-      formData.append('image', selectedFile);
+      const imageFormData = new FormData();
+      imageFormData.append('image', selectedFile);
 
-      // Add basic receipt info (we'll let user fill details on next screen)
-      formData.append('store_name', 'Store Name (Please Edit)');
-      formData.append('amount', '00.01');
-      formData.append('receipt_date', new Date().toISOString().split('T')[0]);
-      formData.append('category', 'Other');
-      formData.append('description', 'Receipt uploaded - please add details');
+      setProgress(30);
 
-      setProgress(50);
+      const imageUploadResponse = await fetch(`${IMAGE_SERVICE_URL}/upload`, {
+        method: 'POST',
+        body: imageFormData
+      });
 
-      const response = await api.upload.receiptImage(formData);
+      if (!imageUploadResponse.ok) {
+        throw new Error('Failed to upload image to image service');
+      }
+
+      const imageData = await imageUploadResponse.json();
+      const imageId = imageData.id;
+
+      setProgress(60);
+
+      const receiptData = {
+        store_name: 'Store Name (Please Edit)',
+        amount: '0.01',
+        receipt_date: new Date().toISOString().split('T')[0],
+        category: 'Other',
+        description: 'Receipt uploaded - please add details',
+        image_id: imageId // Store image ID instead of local path
+      };
+
+      setProgress(80);
+
+      const response = await api.receipts.createWithImageId(receiptData);
 
       setProgress(100);
 
-      // Success - redirect to edit the receipt
       setTimeout(() => {
         navigate(`/receipt/${response.data.receipt.id}/edit`, {
           state: { newUpload: true }
@@ -105,9 +119,7 @@ function ReceiptUpload({ user, onError }) {
 
     } catch (error) {
       console.error('Upload failed:', error);
-      const errorMessage = error.response?.data?.details ||
-                          error.response?.data?.error ||
-                          'Upload failed. Please try again.';
+      const errorMessage = error.message || 'Upload failed. Please try again.';
       onError(errorMessage);
       setProgress(0);
     } finally {
@@ -132,7 +144,6 @@ function ReceiptUpload({ user, onError }) {
             <p>Upload your healthcare receipt to track expenses for HSA/FSA</p>
           </div>
 
-          {/* IH#6: Provide explicit path through the task */}
           {!selectedFile && (
             <div className="upload-instructions" style={{
               background: 'var(--light-gray)',
@@ -154,7 +165,6 @@ function ReceiptUpload({ user, onError }) {
             </div>
           )}
 
-          {/* Upload Area (IH#7: Multiple approaches) */}
           <div
             className={`upload-area ${dragOver ? 'dragover' : ''}`}
             onDragOver={handleDragOver}
@@ -169,7 +179,6 @@ function ReceiptUpload({ user, onError }) {
                   <strong>Choose Upload Method</strong>
                 </div>
                 <div className="upload-buttons">
-                  {/* Camera Capture - Mobile optimized */}
                   <button
                     onClick={() => cameraInputRef.current?.click()}
                     className="btn btn-primary"
@@ -177,7 +186,6 @@ function ReceiptUpload({ user, onError }) {
                     Take Photo
                   </button>
 
-                  {/* File Upload */}
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="btn btn-secondary"
@@ -190,7 +198,6 @@ function ReceiptUpload({ user, onError }) {
                 </div>
               </>
             ) : (
-              /* Preview */
               <div className="upload-preview">
                 <img
                   src={preview}
@@ -205,7 +212,6 @@ function ReceiptUpload({ user, onError }) {
             )}
           </div>
 
-          {/* Hidden File Inputs */}
           <input
             ref={fileInputRef}
             type="file"
@@ -223,7 +229,6 @@ function ReceiptUpload({ user, onError }) {
             className="file-input"
           />
 
-          {/* Progress Bar */}
           {uploading && (
             <div className="upload-progress">
               <div className="progress-bar">
@@ -233,12 +238,14 @@ function ReceiptUpload({ user, onError }) {
                 />
               </div>
               <div className="progress-text">
-                Uploading... {progress}%
+                {progress < 30 ? 'Preparing upload...' :
+                 progress < 60 ? 'Uploading to image service...' :
+                 progress < 80 ? 'Creating receipt record...' :
+                 progress < 100 ? 'Finalizing...' : 'Complete!'}
               </div>
             </div>
           )}
 
-          {/* Action Buttons */}
           {selectedFile && !uploading && (
             <div style={{
               display: 'flex',
@@ -261,7 +268,6 @@ function ReceiptUpload({ user, onError }) {
             </div>
           )}
 
-          {/* Alternative Method */}
           <div className="divider-text">
             <span>OR</span>
           </div>
@@ -276,7 +282,6 @@ function ReceiptUpload({ user, onError }) {
             </button>
           </div>
 
-          {/* Help Section (IH#1: Explain benefits) */}
           <div className="help-section" style={{
             marginTop: 'var(--spacing-xxl)',
             padding: 'var(--spacing-lg)',
@@ -297,18 +302,6 @@ function ReceiptUpload({ user, onError }) {
               <li>Never lose another receipt or miss a deduction</li>
             </ul>
           </div>
-
-          {/* IH#2: Explain costs */}
-          {/* <div className="requirements-note" style={{
-            marginTop: 'var(--spacing-lg)',
-            padding: 'var(--spacing-md)',
-            background: 'var(--warning-color)',
-            color: 'white',
-            borderRadius: 'var(--border-radius-md)',
-            fontSize: 'var(--font-size-sm)'
-          }}>
-            <strong>⚠️ Next Step:</strong> After uploading, you'll need to verify and add details like store name, amount, date, and category. This ensures your records are complete for HSA/FSA documentation.
-          </div> */}
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs').promises;
+const axios = require('axios');
 const { authenticateToken } = require('../middleware/auth');
 const {
   createReceipt,
@@ -14,7 +15,8 @@ const {
 
 const router = express.Router();
 
-// Configure multer for file uploads (IH#7: Multiple approaches)
+const IMAGE_SERVICE_URL = process.env.IMAGE_SERVICE_URL || 'http://localhost:5001';
+
 const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     const uploadDir = path.join(__dirname, '../uploads', req.user.userId.toString());
@@ -37,7 +39,6 @@ const upload = multer({
     fileSize: 10 * 1024 * 1024 // 10MB limit
   },
   fileFilter: (req, file, cb) => {
-    // Accept images only
     if (file.mimetype.startsWith('image/')) {
       cb(null, true);
     } else {
@@ -46,7 +47,19 @@ const upload = multer({
   }
 });
 
-// Get all receipts for user (IH#3: Let users gather as much info as they want)
+async function verifyImageExists(imageId) {
+  try {
+    const response = await axios.head(`${IMAGE_SERVICE_URL}/image/${imageId}`);
+    return response.status === 200;
+  } catch (error) {
+    return false;
+  }
+}
+
+function getImageUrl(imageId) {
+  return imageId ? `${IMAGE_SERVICE_URL}/image/${imageId}` : null;
+}
+
 router.get('/', authenticateToken, async (req, res) => {
   try {
     const { page = 1, limit = 20, category, search } = req.query;
@@ -54,14 +67,12 @@ router.get('/', authenticateToken, async (req, res) => {
 
     let receipts = await getReceiptsByUser(req.user.userId, parseInt(limit), offset);
 
-    // Filter by category if specified
     if (category && category !== 'all') {
       receipts = receipts.filter(receipt =>
         receipt.category.toLowerCase() === category.toLowerCase()
       );
     }
 
-    // Search functionality (IH#3: Users can find specific info)
     if (search) {
       const searchTerm = search.toLowerCase();
       receipts = receipts.filter(receipt =>
@@ -70,6 +81,13 @@ router.get('/', authenticateToken, async (req, res) => {
         receipt.category.toLowerCase().includes(searchTerm)
       );
     }
+
+    // Add image URLs to receipts
+    receipts = receipts.map(receipt => ({
+      ...receipt,
+      image_url: getImageUrl(receipt.image_id),
+      legacy_image_path: receipt.image_path
+    }));
 
     res.json({
       receipts,
@@ -89,7 +107,6 @@ router.get('/', authenticateToken, async (req, res) => {
   }
 });
 
-// Get receipt statistics (IH#3: Summary information)
 router.get('/stats', authenticateToken, async (req, res) => {
   try {
     const stats = await getReceiptStats(req.user.userId);
@@ -103,7 +120,6 @@ router.get('/stats', authenticateToken, async (req, res) => {
   }
 });
 
-// Get single receipt by ID
 router.get('/:id', authenticateToken, async (req, res) => {
   try {
     const receipt = await getReceiptById(req.params.id, req.user.userId);
@@ -114,6 +130,8 @@ router.get('/:id', authenticateToken, async (req, res) => {
         details: 'This receipt may have been deleted or you may not have permission to view it'
       });
     }
+
+    receipt.image_url = getImageUrl(receipt.image_id);
 
     res.json({ receipt });
 
@@ -126,12 +144,11 @@ router.get('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Create new receipt (IH#7: Multiple input methods)
+// Create new receipt
 router.post('/', authenticateToken, upload.single('image'), async (req, res) => {
   try {
-    const { store_name, amount, receipt_date, category, description } = req.body;
+    const { store_name, amount, receipt_date, category, description, image_id } = req.body;
 
-    // Validation (IH#2: Explain costs/requirements)
     if (!store_name || !amount || !receipt_date || !category) {
       return res.status(400).json({
         error: 'Missing required fields',
@@ -140,7 +157,6 @@ router.post('/', authenticateToken, upload.single('image'), async (req, res) => 
       });
     }
 
-    // Validate amount format
     const parsedAmount = parseFloat(amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       return res.status(400).json({
@@ -149,7 +165,6 @@ router.post('/', authenticateToken, upload.single('image'), async (req, res) => 
       });
     }
 
-    // Validate date format
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     if (!dateRegex.test(receipt_date)) {
       return res.status(400).json({
@@ -158,13 +173,22 @@ router.post('/', authenticateToken, upload.single('image'), async (req, res) => 
       });
     }
 
-    // Validate category
     const validCategories = ['Pharmacy', 'Dental', 'Vision', 'Medical Device', 'Doctor Visit', 'Other'];
     if (!validCategories.includes(category)) {
       return res.status(400).json({
         error: 'Invalid category',
         details: `Category must be one of: ${validCategories.join(', ')}`
       });
+    }
+
+    if (image_id) {
+      const imageExists = await verifyImageExists(image_id);
+      if (!imageExists) {
+        return res.status(400).json({
+          error: 'Invalid image ID',
+          details: 'The provided image ID does not exist in the image service'
+        });
+      }
     }
 
     const receiptData = {
@@ -174,6 +198,7 @@ router.post('/', authenticateToken, upload.single('image'), async (req, res) => 
       receipt_date,
       category,
       description: description?.trim() || null,
+      image_id: image_id || null,
       image_path: req.file ? req.file.filename : null
     };
 
@@ -184,14 +209,14 @@ router.post('/', authenticateToken, upload.single('image'), async (req, res) => 
       receipt: {
         id: receipt.id,
         ...receiptData,
-        image_url: req.file ? `/uploads/${req.user.userId}/${req.file.filename}` : null
+        image_url: getImageUrl(image_id),
+        legacy_image_url: req.file ? `/uploads/${req.user.userId}/${req.file.filename}` : null
       }
     });
 
   } catch (error) {
     console.error('Create receipt error:', error);
 
-    // Clean up uploaded file if database save failed
     if (req.file) {
       try {
         await fs.unlink(req.file.path);
@@ -207,13 +232,12 @@ router.post('/', authenticateToken, upload.single('image'), async (req, res) => 
   }
 });
 
-// Update receipt (IH#5: Make undo/redo available)
+// Update receipt
 router.put('/:id', authenticateToken, async (req, res) => {
   try {
     const receiptId = req.params.id;
-    const { store_name, amount, receipt_date, category, description } = req.body;
+    const { store_name, amount, receipt_date, category, description, image_id } = req.body;
 
-    // Check if receipt exists and belongs to user
     const existingReceipt = await getReceiptById(receiptId, req.user.userId);
     if (!existingReceipt) {
       return res.status(404).json({
@@ -222,7 +246,6 @@ router.put('/:id', authenticateToken, async (req, res) => {
       });
     }
 
-    // Build update object with only provided fields
     const updates = {};
     if (store_name !== undefined) updates.store_name = store_name.trim();
     if (amount !== undefined) {
@@ -238,6 +261,19 @@ router.put('/:id', authenticateToken, async (req, res) => {
     if (receipt_date !== undefined) updates.receipt_date = receipt_date;
     if (category !== undefined) updates.category = category;
     if (description !== undefined) updates.description = description?.trim() || null;
+
+    if (image_id !== undefined) {
+      if (image_id && await verifyImageExists(image_id)) {
+        updates.image_id = image_id;
+      } else if (image_id === null || image_id === '') {
+        updates.image_id = null;
+      } else {
+        return res.status(400).json({
+          error: 'Invalid image ID',
+          details: 'The provided image ID does not exist in the image service'
+        });
+      }
+    }
 
     const result = await updateReceipt(receiptId, req.user.userId, updates);
 
@@ -259,12 +295,11 @@ router.put('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Delete receipt (IH#8: Encourage mindful tinkering with confirmation)
+// Delete receipt
 router.delete('/:id', authenticateToken, async (req, res) => {
   try {
     const receiptId = req.params.id;
 
-    // Get receipt info before deletion (for cleanup)
     const receipt = await getReceiptById(receiptId, req.user.userId);
     if (!receipt) {
       return res.status(404).json({
@@ -273,21 +308,18 @@ router.delete('/:id', authenticateToken, async (req, res) => {
       });
     }
 
-    // Delete from database
     const result = await deleteReceipt(receiptId, req.user.userId);
 
     if (result.changes === 0) {
       return res.status(404).json({ error: 'Receipt not found' });
     }
 
-    // Clean up image file if it exists
     if (receipt.image_path) {
       try {
         const imagePath = path.join(__dirname, '../uploads', req.user.userId.toString(), receipt.image_path);
         await fs.unlink(imagePath);
       } catch (fileError) {
-        console.error('Failed to delete image file:', fileError);
-        // Don't fail the request if file cleanup fails
+        console.error('Failed to delete legacy image file:', fileError);
       }
     }
 
@@ -305,7 +337,7 @@ router.delete('/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// Get categories list (IH#6: Provide explicit path)
+// Get categories list
 router.get('/meta/categories', authenticateToken, (req, res) => {
   const categories = [
     {
