@@ -64,6 +64,7 @@ const imageService = {
       });
       return response.ok;
     } catch (error) {
+      console.log(error);
       return false;
     }
   }

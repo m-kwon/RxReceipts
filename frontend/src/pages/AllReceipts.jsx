@@ -342,7 +342,7 @@ function AllReceipts({ user, onError }) {
             <button
               onClick={handleCheckDuplicates}
               disabled={checkingDuplicates || receipts.length === 0}
-              className="btn btn-outline"
+              className="btn btn-primary"
               style={{
                 display: 'flex',
                 alignItems: 'center',
