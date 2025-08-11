@@ -169,9 +169,6 @@ function Dashboard({ user, onError }) {
           <Link to="/receipts" className="btn btn-primary btn-lg">
             View All Receipts
           </Link>
-          <Link to="/receipt/new" className="btn btn-primary btn-lg">
-            Manual Entry
-          </Link>
         </div>
 
         {/* Recent Receipts */}
