@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-// import api from '../services/api';
 
 function ReceiptUpload({ user, onError }) {
   const [selectedFile, setSelectedFile] = useState(null);
@@ -78,8 +77,6 @@ function ReceiptUpload({ user, onError }) {
     setProgress(10);
 
     try {
-      console.log('Step 1: Uploading image to image service...');
-
       const imageFormData = new FormData();
       imageFormData.append('image', selectedFile);
 
@@ -97,9 +94,6 @@ function ReceiptUpload({ user, onError }) {
       console.log('Image uploaded successfully, ID:', imageId);
 
       setProgress(40);
-
-      console.log('Step 2: Processing image with OCR service...');
-
       const ocrResponse = await fetch(`${OCR_SERVICE_URL}/ocr/extract-by-id`, {
         method: 'POST',
         headers: {
@@ -128,9 +122,6 @@ function ReceiptUpload({ user, onError }) {
       }
 
       setProgress(100);
-
-      console.log('Step 3: Navigating to receipt form...');
-
       navigate('/receipt/new', {
         state: {
           imageId: imageId,
@@ -241,6 +232,7 @@ function ReceiptUpload({ user, onError }) {
 
   const proceedManually = () => {
     navigate('/receipt/new');
+    console.log(user);
   };
 
   const clearSelection = () => {
