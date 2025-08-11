@@ -6,6 +6,9 @@ function AllReceipts({ user, onError }) {
   const [receipts, setReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [checkingDuplicates, setCheckingDuplicates] = useState(false);
+  const [duplicateGroups, setDuplicateGroups] = useState([]);
+  const [showDuplicates, setShowDuplicates] = useState(false);
   const [filters, setFilters] = useState({
     search: '',
     category: 'all',
@@ -16,6 +19,7 @@ function AllReceipts({ user, onError }) {
 
   const IMAGE_SERVICE_URL = 'http://localhost:5001';
   const EXPORT_SERVICE_URL = 'http://localhost:5003';
+  const DUPLICATE_SERVICE_URL = 'http://localhost:5004';
 
   useEffect(() => {
     fetchCategories();
@@ -111,6 +115,16 @@ function AllReceipts({ user, onError }) {
       await api.receipts.delete(receiptId);
       setReceipts(prev => prev.filter(r => r.id !== receiptId));
 
+      if (showDuplicates) {
+        setDuplicateGroups(prev =>
+          prev.map(group => ({
+            ...group,
+            receipts: group.receipts.filter(r => r.id !== receiptId),
+            duplicate_count: group.receipts.filter(r => r.id !== receiptId).length
+          })).filter(group => group.receipts.length > 1)
+        );
+      }
+
       const successMessage = document.createElement('div');
       successMessage.className = 'success-banner';
       successMessage.innerHTML = `
@@ -171,7 +185,6 @@ function AllReceipts({ user, onError }) {
         throw new Error(errorData.details || 'Export failed');
       }
 
-      // Get filename from response or generate one
       const contentDisposition = response.headers.get('Content-Disposition');
       let filename = 'receipts_export.xlsx';
       if (contentDisposition) {
@@ -179,7 +192,6 @@ function AllReceipts({ user, onError }) {
         if (match) filename = match[1];
       }
 
-      // Download the file
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -190,7 +202,6 @@ function AllReceipts({ user, onError }) {
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
 
-      // Show success message
       const successMessage = document.createElement('div');
       successMessage.className = 'success-banner';
       successMessage.innerHTML = `
@@ -219,6 +230,71 @@ function AllReceipts({ user, onError }) {
       onError(`Export failed: ${error.message}`);
     } finally {
       setExporting(false);
+    }
+  };
+
+  const handleCheckDuplicates = async () => {
+    if (receipts.length === 0) {
+      onError('No receipts to check for duplicates.');
+      return;
+    }
+
+    setCheckingDuplicates(true);
+
+    try {
+      console.log(`Checking ${receipts.length} receipts for duplicates...`);
+
+      const response = await fetch(`${DUPLICATE_SERVICE_URL}/duplicates/check`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          receipts: receipts
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || 'Duplicate check failed');
+      }
+
+      const data = await response.json();
+      setDuplicateGroups(data.duplicate_groups || []);
+      setShowDuplicates(true);
+
+      const message = data.duplicate_groups.length > 0
+        ? `Found ${data.duplicate_groups.length} duplicate group${data.duplicate_groups.length > 1 ? 's' : ''} with ${data.total_duplicates} total duplicates`
+        : 'No duplicates found! All receipts appear to be unique.';
+
+      const resultMessage = document.createElement('div');
+      resultMessage.className = 'info-banner';
+      resultMessage.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()">×</button>
+      `;
+      resultMessage.style.cssText = `
+        background-color: ${data.duplicate_groups.length > 0 ? 'var(--warning-color)' : 'var(--success-color)'};
+        color: white;
+        padding: var(--spacing-md);
+        position: fixed;
+        top: 70px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-radius: var(--border-radius-md);
+        box-shadow: var(--shadow-md);
+        z-index: 1000;
+        max-width: 80%;
+        text-align: center;
+      `;
+      document.body.appendChild(resultMessage);
+      setTimeout(() => resultMessage.remove(), 5000);
+
+    } catch (error) {
+      console.error('Duplicate check failed:', error);
+      onError(`Duplicate check failed: ${error.message}`);
+    } finally {
+      setCheckingDuplicates(false);
     }
   };
 
@@ -255,9 +331,35 @@ function AllReceipts({ user, onError }) {
             <h1>All Receipts</h1>
             <p style={{ color: 'var(--text-secondary)', margin: '0' }}>
               {receipts.length} receipt{receipts.length !== 1 ? 's' : ''} • {formatCurrency(totalAmount)} total
+              {showDuplicates && duplicateGroups.length > 0 && (
+                <span style={{ color: 'var(--warning-color)', marginLeft: 'var(--spacing-sm)' }}>
+                  • {duplicateGroups.length} duplicate group{duplicateGroups.length > 1 ? 's' : ''} found
+                </span>
+              )}
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--spacing-lg)', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 'var(--spacing-md)', flexWrap: 'wrap' }}>
+            <button
+              onClick={handleCheckDuplicates}
+              disabled={checkingDuplicates || receipts.length === 0}
+              className="btn btn-outline"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-sm)'
+              }}
+            >
+              {checkingDuplicates ? (
+                <>
+                  <div className="loading-spinner" style={{ width: '16px', height: '16px' }}></div>
+                  Checking...
+                </>
+              ) : (
+                <>
+                  Check Duplicates
+                </>
+              )}
+            </button>
             <button
               onClick={handleExport}
               disabled={exporting || receipts.length === 0}
@@ -427,8 +529,33 @@ function AllReceipts({ user, onError }) {
             {receipts.map((receipt) => {
               const imageUrl = getImageUrl(receipt);
 
+              const isDuplicate = showDuplicates && duplicateGroups.some(group =>
+                group.receipts.some(r => r.id === receipt.id)
+              );
+
               return (
-                <div key={receipt.id} className="receipt-card fade-in">
+                <div key={receipt.id} className={`receipt-card fade-in ${isDuplicate ? 'duplicate-receipt' : ''}`}
+                     style={{
+                       border: isDuplicate ? '2px solid var(--warning-color)' : undefined,
+                       position: 'relative'
+                     }}>
+
+                  {isDuplicate && (
+                    <div style={{
+                      position: 'absolute',
+                      top: 'var(--spacing-xs)',
+                      right: 'var(--spacing-xs)',
+                      background: 'var(--warning-color)',
+                      color: 'white',
+                      padding: 'var(--spacing-xs) var(--spacing-sm)',
+                      borderRadius: 'var(--border-radius-sm)',
+                      fontSize: 'var(--font-size-xs)',
+                      fontWeight: 'bold'
+                    }}>
+                      DUPLICATE
+                    </div>
+                  )}
+
                   <div className="receipt-thumbnail">
                     {imageUrl ? (
                       <img
