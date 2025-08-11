@@ -69,6 +69,7 @@ const imageService = {
   }
 };
 
+// API methods
 const apiMethods = {
   setAuthToken: (token) => {
     if (token) {
@@ -94,13 +95,12 @@ const apiMethods = {
     getAll: (params = {}) => api.get('/receipts', { params }),
     getById: (id) => api.get(`/receipts/${id}`),
     create: (receiptData) => api.post('/receipts', receiptData),
-
     createWithImageId: (receiptData) => api.post('/receipts', receiptData),
-
     update: (id, updates) => api.put(`/receipts/${id}`, updates),
     delete: (id) => api.delete(`/receipts/${id}`),
     getStats: () => api.get('/receipts/stats'),
-    getCategories: () => api.get('/receipts/meta/categories')
+    getCategories: () => api.get('/receipts/meta/categories'),
+    processOCR: (imageId) => api.post('/receipts/ocr/parse', { image_id: imageId })
   },
 
   images: imageService,

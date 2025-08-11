@@ -67,20 +67,18 @@ function ReceiptUpload({ user, onError }) {
     }
   };
 
-  const uploadFile = async () => {
+  const uploadAndProcess = async () => {
     if (!selectedFile) {
       onError('Please select a file first');
       return;
     }
 
     setUploading(true);
-    setProgress(10);
+    setProgress(20);
 
     try {
       const imageFormData = new FormData();
       imageFormData.append('image', selectedFile);
-
-      setProgress(30);
 
       const imageUploadResponse = await fetch(`${IMAGE_SERVICE_URL}/upload`, {
         method: 'POST',
@@ -88,7 +86,7 @@ function ReceiptUpload({ user, onError }) {
       });
 
       if (!imageUploadResponse.ok) {
-        throw new Error('Failed to upload image to image service');
+        throw new Error('Failed to upload image');
       }
 
       const imageData = await imageUploadResponse.json();
@@ -96,35 +94,38 @@ function ReceiptUpload({ user, onError }) {
 
       setProgress(60);
 
-      const receiptData = {
-        store_name: 'Store Name (Please Edit)',
-        amount: '0.01',
-        receipt_date: new Date().toISOString().split('T')[0],
-        category: 'Other',
-        description: 'Receipt uploaded - please add details',
-        image_id: imageId // Store image ID instead of local path
-      };
-
-      setProgress(80);
-
-      const response = await api.receipts.createWithImageId(receiptData);
+      const ocrResponse = await api.post('/receipts/ocr/parse', {
+        image_id: imageId
+      });
 
       setProgress(100);
 
-      setTimeout(() => {
-        navigate(`/receipt/${response.data.receipt.id}/edit`, {
-          state: { newUpload: true }
+      if (ocrResponse.data.success) {
+        navigate('/receipt/new', {
+          state: {
+            ocrData: ocrResponse.data.data,
+            imageId: imageId
+          }
         });
-      }, 500);
+      } else {
+        navigate('/receipt/new', {
+          state: {
+            imageId: imageId
+          }
+        });
+      }
 
     } catch (error) {
-      console.error('Upload failed:', error);
-      const errorMessage = error.message || 'Upload failed. Please try again.';
-      onError(errorMessage);
+      console.error('Upload and OCR failed:', error);
       setProgress(0);
+      onError('Upload failed: ' + error.message);
     } finally {
       setUploading(false);
     }
+  };
+
+  const proceedManually = () => {
+    navigate('/receipt/new');
   };
 
   const clearSelection = () => {
@@ -141,7 +142,7 @@ function ReceiptUpload({ user, onError }) {
         <div className="upload-container">
           <div className="upload-header">
             <h1>Add New Receipt</h1>
-            <p>Upload your healthcare receipt to track expenses for HSA/FSA</p>
+            <p>Upload your healthcare receipt to automatically extract expense details</p>
           </div>
 
           {!selectedFile && (
@@ -160,6 +161,7 @@ function ReceiptUpload({ user, onError }) {
                 <li>Ensure the receipt is well-lit and text is clearly visible</li>
                 <li>Lay the receipt flat on a contrasting surface</li>
                 <li>Include the full receipt with all edges visible</li>
+                <li>Avoid shadows, glare, and blurry text</li>
                 <li>Supported formats: JPG, PNG (max 10MB)</li>
               </ul>
             </div>
@@ -229,6 +231,7 @@ function ReceiptUpload({ user, onError }) {
             className="file-input"
           />
 
+          {/* Progress Bar */}
           {uploading && (
             <div className="upload-progress">
               <div className="progress-bar">
@@ -238,14 +241,14 @@ function ReceiptUpload({ user, onError }) {
                 />
               </div>
               <div className="progress-text">
-                {progress < 30 ? 'Preparing upload...' :
-                 progress < 60 ? 'Uploading to image service...' :
-                 progress < 80 ? 'Creating receipt record...' :
-                 progress < 100 ? 'Finalizing...' : 'Complete!'}
+                {progress < 30 ? 'Uploading image...' :
+                 progress < 80 ? 'Processing receipt...' :
+                 progress < 100 ? 'Extracting data...' : 'Complete!'}
               </div>
             </div>
           )}
 
+          {/* Action Buttons */}
           {selectedFile && !uploading && (
             <div style={{
               display: 'flex',
@@ -254,7 +257,7 @@ function ReceiptUpload({ user, onError }) {
               marginTop: 'var(--spacing-xl)'
             }}>
               <button
-                onClick={uploadFile}
+                onClick={uploadAndProcess}
                 className="btn btn-primary btn-lg"
               >
                 Upload & Continue
@@ -274,7 +277,7 @@ function ReceiptUpload({ user, onError }) {
 
           <div style={{ textAlign: 'center' }}>
             <button
-              onClick={() => navigate('/receipt/new')}
+              onClick={proceedManually}
               className="btn btn-outline btn-lg"
               disabled={uploading}
             >
@@ -289,17 +292,17 @@ function ReceiptUpload({ user, onError }) {
             borderRadius: 'var(--border-radius-md)',
             borderLeft: '4px solid var(--primary-color)'
           }}>
-            <h4 style={{ color: 'var(--primary-color)', marginTop: 0 }}>Why Upload Receipts?</h4>
+            <h4 style={{ color: 'var(--primary-color)', marginTop: 0 }}>How It Works</h4>
             <ul style={{
               fontSize: 'var(--font-size-sm)',
               color: 'var(--text-secondary)',
               paddingLeft: 'var(--spacing-lg)',
               margin: 0
             }}>
-              <li>Keep digital backups of important medical expense records</li>
-              <li>Automatically organize receipts by medical category</li>
-              <li>Generate HSA/FSA compliant reports for easy reimbursement</li>
-              <li>Never lose another receipt or miss a deduction</li>
+              <li>Upload your receipt image and we'll automatically read the text</li>
+              <li>Our system extracts store name, amount, date, and categorizes the expense</li>
+              <li>Review and edit the extracted data before saving</li>
+              <li>Save time and reduce manual data entry errors</li>
             </ul>
           </div>
         </div>

@@ -14,28 +14,35 @@ function ReceiptForm({ user, onError, isEdit = false }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [existingReceipt, setExistingReceipt] = useState(null);
+  const [imageId, setImageId] = useState(null);
 
   const navigate = useNavigate();
   const { id } = useParams();
   const location = useLocation();
 
-  // Check if this is a new upload that needs editing
-  const isNewUpload = location.state?.newUpload;
+  const IMAGE_SERVICE_URL = 'http://localhost:5001';
 
   useEffect(() => {
     fetchCategories();
 
+    if (location.state?.ocrData) {
+      populateFormWithOcrData(location.state.ocrData);
+    }
+
+    if (location.state?.imageId) {
+      setImageId(location.state.imageId);
+    }
+
     if (isEdit && id) {
       fetchReceiptData();
     }
-  }, [isEdit, id]);
+  }, [isEdit, id, location.state]);
 
   const fetchCategories = async () => {
     try {
       const response = await api.receipts.getCategories();
       setCategories(response.data.categories || []);
 
-      // Set default category if none selected
       if (!formData.category && response.data.categories.length > 0) {
         setFormData(prev => ({
           ...prev,
@@ -46,6 +53,24 @@ function ReceiptForm({ user, onError, isEdit = false }) {
       console.error('Failed to fetch categories:', error);
       onError('Failed to load categories. Please refresh the page.');
     }
+  };
+
+  const populateFormWithOcrData = (ocrResult) => {
+    const limitStoreName = (name) => {
+      if (!name) return '';
+      return name.split(' ').slice(0, 3).join(' ');
+    };
+
+    setFormData(prev => ({
+      ...prev,
+      store_name: limitStoreName(ocrResult.store_name) || prev.store_name,
+      amount: ocrResult.amount ? ocrResult.amount.toString() : prev.amount,
+      receipt_date: ocrResult.receipt_date || prev.receipt_date,
+      category: ocrResult.suggested_category || prev.category,
+      description: ocrResult.line_items && ocrResult.line_items.length > 0
+        ? ocrResult.line_items.map(item => `${item.description} - $${item.price}`).join('; ')
+        : prev.description
+    }));
   };
 
   const fetchReceiptData = async () => {
@@ -64,6 +89,10 @@ function ReceiptForm({ user, onError, isEdit = false }) {
         category: receipt.category || '',
         description: receipt.description || ''
       });
+
+      if (receipt.image_id) {
+        setImageId(receipt.image_id);
+      }
     } catch (error) {
       console.error('Failed to fetch receipt:', error);
       onError('Failed to load receipt data. Please try again.');
@@ -75,10 +104,20 @@ function ReceiptForm({ user, onError, isEdit = false }) {
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+
+    // Limit store name to 3 words
+    if (name === 'store_name') {
+      const limitedValue = value.split(' ').slice(0, 3).join(' ');
+      setFormData(prev => ({
+        ...prev,
+        [name]: limitedValue
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value
+      }));
+    }
   };
 
   const validateForm = () => {
@@ -103,7 +142,7 @@ function ReceiptForm({ user, onError, isEdit = false }) {
     // Validate date is not in the future
     const receiptDate = new Date(formData.receipt_date);
     const today = new Date();
-    today.setHours(23, 59, 59, 999); // End of today
+    today.setHours(23, 59, 59, 999);
 
     if (receiptDate > today) {
       errors.push('Receipt date cannot be in the future');
@@ -130,44 +169,19 @@ function ReceiptForm({ user, onError, isEdit = false }) {
         amount: parseFloat(formData.amount),
         receipt_date: formData.receipt_date,
         category: formData.category,
-        description: formData.description.trim() || null
+        description: formData.description.trim() || null,
+        image_id: imageId || null
       };
 
       let response;
       if (isEdit && id) {
-        // Update existing receipt
         response = await api.receipts.update(id, receiptData);
-
-        // Success message
-        const successDiv = document.createElement('div');
-        successDiv.style.cssText = `
-          position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
-          background: var(--success-color); color: white; padding: var(--spacing-md);
-          border-radius: var(--border-radius-md); box-shadow: var(--shadow-md);
-          z-index: 1000;
-        `;
-        successDiv.innerHTML = '<span>Receipt updated successfully! ✅</span>';
-        document.body.appendChild(successDiv);
-        setTimeout(() => successDiv.remove(), 3000);
-
+        showSuccessMessage('Receipt updated successfully!');
       } else {
-        // Create new receipt
-        response = await api.receipts.create(receiptData);
-
-        // Success message
-        const successDiv = document.createElement('div');
-        successDiv.style.cssText = `
-          position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
-          background: var(--success-color); color: white; padding: var(--spacing-md);
-          border-radius: var(--border-radius-md); box-shadow: var(--shadow-md);
-          z-index: 1000;
-        `;
-        successDiv.innerHTML = '<span>Receipt saved successfully! ✅</span>';
-        document.body.appendChild(successDiv);
-        setTimeout(() => successDiv.remove(), 3000);
+        response = await api.receipts.createWithImageId(receiptData);
+        showSuccessMessage('Receipt saved successfully!');
       }
 
-      // Navigate back to receipts list
       setTimeout(() => {
         navigate('/receipts');
       }, 1000);
@@ -183,7 +197,19 @@ function ReceiptForm({ user, onError, isEdit = false }) {
     }
   };
 
-  // IH#8: Encourage mindful tinkering - warn about unsaved changes
+  const showSuccessMessage = (message) => {
+    const successDiv = document.createElement('div');
+    successDiv.style.cssText = `
+      position: fixed; top: 70px; left: 50%; transform: translateX(-50%);
+      background: var(--success-color); color: white; padding: var(--spacing-md);
+      border-radius: var(--border-radius-md); box-shadow: var(--shadow-md);
+      z-index: 1000;
+    `;
+    successDiv.innerHTML = `<span>${message}</span>`;
+    document.body.appendChild(successDiv);
+    setTimeout(() => successDiv.remove(), 3000);
+  };
+
   const handleCancel = () => {
     const hasChanges = isEdit ? (
       formData.store_name !== (existingReceipt?.store_name || '') ||
@@ -227,232 +253,255 @@ function ReceiptForm({ user, onError, isEdit = false }) {
           {/* Header */}
           <div className="upload-header">
             <h1>
-              {isEdit ? 'Edit Receipt' : 'Add Receipt Details'}
+              {isEdit ? 'Edit Receipt' : 'Receipt Details'}
             </h1>
             <p>
               {isEdit
                 ? 'Update your receipt information'
-                : isNewUpload
-                  ? 'Please verify and complete the receipt information'
-                  : 'Enter your receipt details manually'
+                : 'Review and complete the receipt details'
               }
             </p>
           </div>
 
-          {/* New Upload Notice */}
-          {isNewUpload && (
+          {/* Image Display */}
+          {imageId && (
             <div style={{
-              background: 'var(--info-color)',
-              color: 'white',
-              padding: 'var(--spacing-md)',
-              borderRadius: 'var(--border-radius-md)',
-              marginBottom: 'var(--spacing-lg)',
-              fontSize: 'var(--font-size-sm)'
+              display: 'flex',
+              gap: 'var(--spacing-xl)',
+              marginBottom: 'var(--spacing-xl)',
+              alignItems: 'flex-start'
             }}>
-              <strong>Image uploaded successfully!</strong> Please review and complete the details below.
+              {/* Receipt Image */}
+              <div style={{
+                flex: '0 0 300px',
+                background: 'var(--light-gray)',
+                borderRadius: 'var(--border-radius-md)',
+                padding: 'var(--spacing-md)',
+                textAlign: 'center'
+              }}>
+                <h4 style={{ marginTop: 0, marginBottom: 'var(--spacing-md)' }}>Receipt Image</h4>
+                <img
+                  src={`${IMAGE_SERVICE_URL}/image/${imageId}`}
+                  alt="Uploaded receipt"
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '400px',
+                    borderRadius: 'var(--border-radius-sm)',
+                    boxShadow: 'var(--shadow-sm)'
+                  }}
+                  onError={(e) => {
+                    e.target.style.display = 'none';
+                    e.target.nextSibling.style.display = 'block';
+                  }}
+                />
+                <div style={{ display: 'none', padding: 'var(--spacing-lg)' }}>
+                  📄 Image not available
+                </div>
+              </div>
+
+              {/* Form Content */}
+              <div style={{ flex: 1 }}>
+                <ReceiptFormContent />
+              </div>
             </div>
           )}
 
-          {/* IH#2: Explain requirements and costs */}
-          <div className="form-requirements" style={{
-            background: 'var(--light-gray)',
-            padding: 'var(--spacing-lg)',
-            borderRadius: 'var(--border-radius-md)',
-            marginBottom: 'var(--spacing-xl)'
-          }}>
-            <h3 style={{ marginTop: 0, color: 'var(--text-primary)' }}>Required for HSA/FSA Compliance</h3>
-            <p style={{
-              fontSize: 'var(--font-size-sm)',
-              color: 'var(--text-secondary)',
-              margin: 0
-            }}>
-              Fields marked with <span style={{ color: 'var(--danger-color)' }}>*</span> are required for proper expense documentation and reimbursement claims.
-            </p>
-          </div>
-
-          {/* Receipt Form */}
-          <form onSubmit={handleSubmit} className="receipt-form">
-            {/* Store/Provider Name */}
-            <div className="form-group">
-              <label htmlFor="store_name">
-                Store/Provider Name <span className="required">*</span>
-              </label>
-              <input
-                type="text"
-                id="store_name"
-                name="store_name"
-                value={formData.store_name}
-                onChange={handleChange}
-                placeholder="CVS Pharmacy, Dr. Smith Dental, etc."
-                className="form-input"
-                required
-                autoComplete="organization"
-              />
-              <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
-                The business or healthcare provider name
-              </small>
-            </div>
-
-            {/* Amount and Date Row */}
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 'var(--spacing-lg)'
-            }}>
-              {/* Amount */}
-              <div className="form-group">
-                <label htmlFor="amount">
-                  Amount <span className="required">*</span>
-                </label>
-                <input
-                  type="number"
-                  id="amount"
-                  name="amount"
-                  value={formData.amount}
-                  onChange={handleChange}
-                  placeholder="0.00"
-                  step="0.01"
-                  min="0"
-                  className="form-input"
-                  required
-                />
-                <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
-                  Total amount paid (USD)
-                </small>
-              </div>
-
-              {/* Date */}
-              <div className="form-group">
-                <label htmlFor="receipt_date">
-                  Receipt Date <span className="required">*</span>
-                </label>
-                <input
-                  type="date"
-                  id="receipt_date"
-                  name="receipt_date"
-                  value={formData.receipt_date}
-                  onChange={handleChange}
-                  max={new Date().toISOString().split('T')[0]}
-                  className="form-input"
-                  required
-                />
-                <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
-                  When the expense occurred
-                </small>
-              </div>
-            </div>
-
-            {/* Category */}
-            <div className="form-group">
-              <label htmlFor="category">
-                Medical Category <span className="required">*</span>
-              </label>
-              <select
-                id="category"
-                name="category"
-                value={formData.category}
-                onChange={handleChange}
-                className="form-select"
-                required
-              >
-                <option value="">Select a category...</option>
-                {categories.map(cat => (
-                  <option key={cat.value} value={cat.value}>
-                    {/* {cat.label} {cat.hsa_eligible === true ? '✅' : cat.hsa_eligible === 'varies' ? '⚠️' : ''} */}
-                    {cat.label} {cat.hsa_eligible === true ? '' : cat.hsa_eligible === 'varies' ? '' : ''}
-                  </option>
-                ))}
-              </select>
-              {/* <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
-                ✅ = Generally HSA/FSA eligible • ⚠️ = Eligibility varies • Choose the most specific category
-              </small> */}
-            </div>
-
-            {/* Description */}
-            <div className="form-group">
-              <label htmlFor="description">
-                Description <span style={{ color: 'var(--text-secondary)' }}>(Optional)</span>
-              </label>
-              <textarea
-                id="description"
-                name="description"
-                value={formData.description}
-                onChange={handleChange}
-                placeholder="Additional details about this expense (medication name, procedure, etc.)"
-                className="form-textarea"
-                rows="3"
-              />
-              <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
-                Optional notes to help you remember this expense
-              </small>
-            </div>
-
-            {/* Form Actions */}
-            <div className="form-actions" style={{
-              display: 'flex',
-              gap: 'var(--spacing-lg)',
-              justifyContent: 'center',
-              marginTop: 'var(--spacing-xxl)'
-            }}>
-              <button
-                type="submit"
-                disabled={saving}
-                className="btn btn-primary btn-lg"
-              >
-                {saving
-                  ? (isEdit ? 'Updating...' : 'Saving...')
-                  : (isEdit ? 'Update Receipt' : 'Save Receipt')
-                }
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCancel}
-                disabled={saving}
-                className="btn btn-outline btn-lg"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-
-          {/* Form Tips (IH#6: Provide explicit path) */}
-          <div className="form-tips" style={{
-            marginTop: 'var(--spacing-xxl)',
-            padding: 'var(--spacing-lg)',
-            background: 'rgba(39, 174, 96, 0.05)',
-            borderRadius: 'var(--border-radius-md)',
-            borderLeft: '4px solid var(--secondary-color)'
-          }}>
-            <h4 style={{ color: 'var(--secondary-color)', marginTop: 0 }}>Tips for Accurate Records</h4>
-            <ul style={{
-              fontSize: 'var(--font-size-sm)',
-              color: 'var(--text-secondary)',
-              paddingLeft: 'var(--spacing-lg)',
-              margin: 0
-            }}>
-              <li><strong>Store Name:</strong> Use the exact business name from the receipt</li>
-              <li><strong>Amount:</strong> Enter the total amount you paid (after insurance, if applicable)</li>
-              <li><strong>Category:</strong> Choose the most specific category for better organization</li>
-              <li><strong>Description:</strong> Add details like medication names or procedure types for easier searching</li>
-            </ul>
-          </div>
-
-          {/* HSA/FSA Info */}
-          {/* <div className="hsa-info" style={{
-            marginTop: 'var(--spacing-lg)',
-            padding: 'var(--spacing-md)',
-            background: 'var(--info-color)',
-            color: 'white',
-            borderRadius: 'var(--border-radius-md)',
-            fontSize: 'var(--font-size-sm)'
-          }}>
-            <strong>ℹHSA/FSA Note:</strong> This receipt will be stored securely and can be included in expense reports for reimbursement. Consult your plan administrator for specific eligibility rules.
-          </div> */}
+          {/* Form without image */}
+          {!imageId && <ReceiptFormContent />}
         </div>
       </div>
     </div>
   );
+
+  function ReceiptFormContent() {
+    return (
+      <>
+        {/* Requirements Info */}
+        <div className="form-requirements" style={{
+          background: 'var(--light-gray)',
+          padding: 'var(--spacing-lg)',
+          borderRadius: 'var(--border-radius-md)',
+          marginBottom: 'var(--spacing-xl)'
+        }}>
+          <h3 style={{ marginTop: 0, color: 'var(--text-primary)' }}>Required for HSA/FSA Compliance</h3>
+          <p style={{
+            fontSize: 'var(--font-size-sm)',
+            color: 'var(--text-secondary)',
+            margin: 0
+          }}>
+            Fields marked with <span style={{ color: 'var(--danger-color)' }}>*</span> are required for proper expense documentation and reimbursement claims.
+          </p>
+        </div>
+
+        {/* Receipt Form */}
+        <form onSubmit={handleSubmit} className="receipt-form">
+          {/* Store/Provider Name */}
+          <div className="form-group">
+            <label htmlFor="store_name">
+              Store/Provider Name <span className="required">*</span>
+            </label>
+            <input
+              type="text"
+              id="store_name"
+              name="store_name"
+              value={formData.store_name}
+              onChange={handleChange}
+              placeholder="CVS Pharmacy, Dr. Smith Dental, etc."
+              className="form-input"
+              required
+              autoComplete="organization"
+              maxLength="50"
+            />
+            <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
+              The business or healthcare provider name
+            </small>
+          </div>
+
+          {/* Amount and Date Row */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: '1fr 1fr',
+            gap: 'var(--spacing-lg)'
+          }}>
+            {/* Amount */}
+            <div className="form-group">
+              <label htmlFor="amount">
+                Amount <span className="required">*</span>
+              </label>
+              <input
+                type="number"
+                id="amount"
+                name="amount"
+                value={formData.amount}
+                onChange={handleChange}
+                placeholder="0.00"
+                step="0.01"
+                min="0"
+                className="form-input"
+                required
+              />
+              <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
+                Total amount paid (USD)
+              </small>
+            </div>
+
+            {/* Date */}
+            <div className="form-group">
+              <label htmlFor="receipt_date">
+                Receipt Date <span className="required">*</span>
+              </label>
+              <input
+                type="date"
+                id="receipt_date"
+                name="receipt_date"
+                value={formData.receipt_date}
+                onChange={handleChange}
+                max={new Date().toISOString().split('T')[0]}
+                className="form-input"
+                required
+              />
+              <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
+                When the expense occurred
+              </small>
+            </div>
+          </div>
+
+          {/* Category */}
+          <div className="form-group">
+            <label htmlFor="category">
+              Medical Category <span className="required">*</span>
+            </label>
+            <select
+              id="category"
+              name="category"
+              value={formData.category}
+              onChange={handleChange}
+              className="form-select"
+              required
+            >
+              <option value="">Select a category...</option>
+              {categories.map(cat => (
+                <option key={cat.value} value={cat.value}>
+                  {cat.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Description */}
+          <div className="form-group">
+            <label htmlFor="description">
+              Description <span style={{ color: 'var(--text-secondary)' }}>(Optional)</span>
+            </label>
+            <textarea
+              id="description"
+              name="description"
+              value={formData.description}
+              onChange={handleChange}
+              placeholder="Additional details about this expense (medication name, procedure, etc.)"
+              className="form-textarea"
+              rows="4"
+            />
+            <small style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)' }}>
+              Notes to help you remember this expense
+            </small>
+          </div>
+
+          {/* Form Actions */}
+          <div className="form-actions" style={{
+            display: 'flex',
+            gap: 'var(--spacing-lg)',
+            justifyContent: 'center',
+            marginTop: 'var(--spacing-xxl)'
+          }}>
+            <button
+              type="submit"
+              disabled={saving}
+              className="btn btn-primary btn-lg"
+            >
+              {saving
+                ? (isEdit ? 'Updating...' : 'Saving...')
+                : (isEdit ? 'Update Receipt' : 'Save Receipt')
+              }
+            </button>
+
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={saving}
+              className="btn btn-outline btn-lg"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+
+        {/* Form Tips */}
+        <div className="form-tips" style={{
+          marginTop: 'var(--spacing-xxl)',
+          padding: 'var(--spacing-lg)',
+          background: 'rgba(39, 174, 96, 0.05)',
+          borderRadius: 'var(--border-radius-md)',
+          borderLeft: '4px solid var(--secondary-color)'
+        }}>
+          <h4 style={{ color: 'var(--secondary-color)', marginTop: 0 }}>
+            Tips for Accurate Records
+          </h4>
+          <ul style={{
+            fontSize: 'var(--font-size-sm)',
+            color: 'var(--text-secondary)',
+            paddingLeft: 'var(--spacing-lg)',
+            margin: 0
+          }}>
+            <li><strong>Store Name:</strong> Use the exact business name from the receipt</li>
+            <li><strong>Amount:</strong> Enter the total amount you paid (after insurance, if applicable)</li>
+            <li><strong>Category:</strong> Choose the most specific category for better organization</li>
+            <li><strong>Description:</strong> Add details like medication names or procedure types for easier searching</li>
+          </ul>
+        </div>
+      </>
+    );
+  }
 }
 
 export default ReceiptForm;

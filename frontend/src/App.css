@@ -80,7 +80,7 @@ body {
 
 .main-content {
   flex: 1;
-  padding-top: 60px; /* Account for navbar */
+  padding-top: 60px;
 }
 
 /* Loading States */
@@ -260,7 +260,6 @@ body {
   border-radius: var(--border-radius-md);
   font-size: var(--font-size-md);
   background-color: rgb(42, 42, 42);
-  /* background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,9 12,15 18,9"></polyline></svg>'); */
   background-repeat: no-repeat;
   background-position: right 12px center;
   background-size: 16px;
@@ -1238,7 +1237,31 @@ body {
   align-self: flex-start;
 }
 
-/* Better responsive behavior for wider screens */
+.receipt-form-with-image {
+  display: flex;
+  gap: var(--spacing-xl);
+  align-items: flex-start;
+}
+
+.receipt-image-container {
+  flex: 0 0 300px;
+  background: var(--light-gray);
+  border-radius: var(--border-radius-md);
+  padding: var(--spacing-md);
+  text-align: center;
+}
+
+.receipt-image {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: var(--border-radius-sm);
+  box-shadow: var(--shadow-sm);
+}
+
+.receipt-form-content {
+  flex: 1;
+}
+
 @media (min-width: 1200px) {
   .container {
     max-width: 100%;
