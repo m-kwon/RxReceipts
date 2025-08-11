@@ -17,7 +17,6 @@ function Dashboard({ user, onError }) {
     try {
       setLoading(true);
 
-      // Fetch stats and recent receipts in parallel
       const [statsResponse, receiptsResponse] = await Promise.all([
         api.receipts.getStats(),
         api.receipts.getAll({ limit: 5 })
@@ -50,11 +49,9 @@ function Dashboard({ user, onError }) {
   };
 
   const getImageUrl = (receipt) => {
-    // Use image service URL if image_id exists
     if (receipt.image_id) {
       return `${IMAGE_SERVICE_URL}/image/${receipt.image_id}`;
     }
-    // Fallback to legacy image path
     if (receipt.image_path) {
       return `http://localhost:3001/uploads/${user.id}/${receipt.image_path}`;
     }

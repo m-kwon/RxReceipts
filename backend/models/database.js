@@ -310,33 +310,43 @@ const dbHelpers = {
 
   getReceiptStats: (userId) => {
     return new Promise((resolve, reject) => {
-      const sql = `
+      const overallSql = `
         SELECT
           COUNT(*) as total_receipts,
-          SUM(amount) as total_amount,
-          COUNT(DISTINCT category) as categories_used,
+          COALESCE(SUM(amount), 0) as total_amount
+        FROM receipts
+        WHERE user_id = ?
+      `;
+
+      const categorySql = `
+        SELECT
           category,
-          COUNT(*) as category_count,
-          SUM(amount) as category_total
+          COUNT(*) as count,
+          COALESCE(SUM(amount), 0) as total
         FROM receipts
         WHERE user_id = ?
         GROUP BY category
+        ORDER BY total DESC
       `;
 
-      db.all(sql, [userId], (err, rows) => {
-        if (err) reject(err);
-        else {
-          const totalStats = {
-            total_receipts: rows.length > 0 ? rows[0].total_receipts : 0,
-            total_amount: rows.reduce((sum, row) => sum + (row.category_total || 0), 0),
-            categories: rows.map(row => ({
-              category: row.category,
-              count: row.category_count,
-              total: row.category_total
-            }))
-          };
-          resolve(totalStats);
+      db.get(overallSql, [userId], (err, overallStats) => {
+        if (err) {
+          reject(err);
+          return;
         }
+
+        db.all(categorySql, [userId], (err, categoryStats) => {
+          if (err) {
+            reject(err);
+            return;
+          }
+
+          resolve({
+            total_receipts: overallStats.total_receipts || 0,
+            total_amount: overallStats.total_amount || 0,
+            categories: categoryStats || []
+          });
+        });
       });
     });
   },
