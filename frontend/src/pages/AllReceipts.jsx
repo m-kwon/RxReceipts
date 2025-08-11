@@ -5,6 +5,7 @@ import api from '../services/api';
 function AllReceipts({ user, onError }) {
   const [receipts, setReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
   const [filters, setFilters] = useState({
     search: '',
     category: 'all',
@@ -14,6 +15,7 @@ function AllReceipts({ user, onError }) {
   const [categories, setCategories] = useState([]);
 
   const IMAGE_SERVICE_URL = 'http://localhost:5001';
+  const EXPORT_SERVICE_URL = 'http://localhost:5003';
 
   useEffect(() => {
     fetchCategories();
@@ -136,6 +138,90 @@ function AllReceipts({ user, onError }) {
     }
   };
 
+  const handleExport = async () => {
+    if (receipts.length === 0) {
+      onError('No receipts to export. Add some receipts first.');
+      return;
+    }
+
+    setExporting(true);
+
+    try {
+      console.log(`Exporting ${receipts.length} receipts...`);
+
+      const exportPayload = {
+        receipts: receipts,
+        filters: filters,
+        user_info: {
+          name: user.name,
+          email: user.email
+        }
+      };
+
+      const response = await fetch(`${EXPORT_SERVICE_URL}/export/receipts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(exportPayload)
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.details || 'Export failed');
+      }
+
+      // Get filename from response or generate one
+      const contentDisposition = response.headers.get('Content-Disposition');
+      let filename = 'receipts_export.xlsx';
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="(.+)"/);
+        if (match) filename = match[1];
+      }
+
+      // Download the file
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+
+      // Show success message
+      const successMessage = document.createElement('div');
+      successMessage.className = 'success-banner';
+      successMessage.innerHTML = `
+        <span>Export complete! ${receipts.length} receipts exported to ${filename}</span>
+        <button onclick="this.parentElement.remove()">×</button>
+      `;
+      successMessage.style.cssText = `
+        background-color: var(--success-color);
+        color: white;
+        padding: var(--spacing-md);
+        position: fixed;
+        top: 70px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-radius: var(--border-radius-md);
+        box-shadow: var(--shadow-md);
+        z-index: 1000;
+        max-width: 80%;
+        text-align: center;
+      `;
+      document.body.appendChild(successMessage);
+      setTimeout(() => successMessage.remove(), 5000);
+
+    } catch (error) {
+      console.error('Export failed:', error);
+      onError(`Export failed: ${error.message}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
@@ -161,7 +247,9 @@ function AllReceipts({ user, onError }) {
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          marginBottom: 'var(--spacing-xl)'
+          marginBottom: 'var(--spacing-xl)',
+          flexWrap: 'wrap',
+          gap: 'var(--spacing-md)'
         }}>
           <div>
             <h1>All Receipts</h1>
@@ -169,9 +257,32 @@ function AllReceipts({ user, onError }) {
               {receipts.length} receipt{receipts.length !== 1 ? 's' : ''} • {formatCurrency(totalAmount)} total
             </p>
           </div>
-          <Link to="/upload" className="btn btn-primary">
-            Add Receipt
-          </Link>
+          <div style={{ display: 'flex', gap: 'var(--spacing-lg)', flexWrap: 'wrap' }}>
+            <button
+              onClick={handleExport}
+              disabled={exporting || receipts.length === 0}
+              className="btn btn-secondary"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-sm)'
+              }}
+            >
+              {exporting ? (
+                <>
+                  <div className="loading-spinner" style={{ width: '16px', height: '16px' }}></div>
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  Export
+                </>
+              )}
+            </button>
+            <Link to="/upload" className="btn btn-primary">
+              Add Receipt
+            </Link>
+          </div>
         </div>
 
         {/* Filters Section */}
@@ -396,29 +507,6 @@ function AllReceipts({ user, onError }) {
                 </div>
               );
             })}
-          </div>
-        )}
-
-        {/* Summary Footer */}
-        {!loading && receipts.length > 0 && (
-          <div className="summary-footer" style={{
-            marginTop: 'var(--spacing-xxl)',
-            padding: 'var(--spacing-lg)',
-            background: 'white',
-            borderRadius: 'var(--border-radius-lg)',
-            boxShadow: 'var(--shadow-sm)',
-            textAlign: 'center'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-around', flexWrap: 'wrap', gap: 'var(--spacing-lg)' }}>
-              <div>
-                <div style={{ fontSize: 'var(--font-size-xl)', fontWeight: 'bold', color: 'var(--accent-color)' }}>
-                  {new Set(receipts.map(r => r.category)).size}
-                </div>
-                <div style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-secondary)' }}>
-                  Categories
-                </div>
-              </div>
-            </div>
           </div>
         )}
       </div>
